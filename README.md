@@ -39,17 +39,8 @@ QueueSmart_A2_Complete/
 ├── app.js
 ├── assets/
 │   ├── queuesmart-logo.svg
-│   └── README.txt
-├── screenshots/
-│   ├── login.png
-│   ├── register.png
-│   ├── user-dashboard.png
-│   ├── join-queue.png
-│   ├── queue-status.png
-│   ├── history.png
-│   ├── admin-dashboard.png
-│   ├── service-management.png
-│   └── queue-management.png
+│   
+|
 └── README.md
 ```
 

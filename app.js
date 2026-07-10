@@ -44,11 +44,45 @@ function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
+function normalizeRole(roleValue) {
+  const normalizedRole = (roleValue || '').trim().toLowerCase();
+  if (normalizedRole.includes('admin')) return 'Administrator';
+  if (normalizedRole.includes('user')) return 'User';
+  return 'User';
+}
+
+function persistUserSession(user) {
+  try {
+    localStorage.setItem('queuesmart-user', JSON.stringify(user));
+  } catch (error) {
+    console.warn('Unable to save user session', error);
+  }
+}
+
+function getStoredUserSession() {
+  try {
+    const storedValue = localStorage.getItem('queuesmart-user');
+    return storedValue ? JSON.parse(storedValue) : null;
+  } catch (error) {
+    console.warn('Unable to read user session', error);
+    return null;
+  }
+}
+
+function resolveRole(email, roleHint = '') {
+  const normalizedEmail = (email || '').trim().toLowerCase();
+  if (normalizeRole(roleHint) === 'Administrator' || normalizedEmail.includes('admin') || normalizedEmail.includes('staff')) {
+    return 'Administrator';
+  }
+  return 'User';
+}
+
 const loginForm = document.getElementById('loginForm');
 loginForm.addEventListener('submit', (event) => {
   event.preventDefault();
   const email = document.getElementById('loginEmail').value;
   const password = document.getElementById('loginPassword').value;
+  const storedUser = getStoredUserSession();
   let valid = true;
 
   if (!isValidEmail(email)) {
@@ -65,7 +99,11 @@ loginForm.addEventListener('submit', (event) => {
     setError('loginPasswordError', '');
   }
 
-  if (valid) showScreen('user-dashboard');
+  if (valid) {
+    const role = resolveRole(email, storedUser?.role || '');
+    persistUserSession({ email, role, fullName: storedUser?.fullName || 'Guest' });
+    showScreen(role === 'Administrator' ? 'admin-dashboard' : 'user-dashboard');
+  }
 });
 
 const registerForm = document.getElementById('registerForm');
@@ -108,7 +146,11 @@ registerForm.addEventListener('submit', (event) => {
     setError('roleSelectError', '');
   }
 
-  if (valid) showScreen(role === 'Administrator' ? 'admin-dashboard' : 'user-dashboard');
+  if (valid) {
+    const resolvedRole = resolveRole(email, role);
+    persistUserSession({ fullName, email, role: resolvedRole });
+    showScreen(resolvedRole === 'Administrator' ? 'admin-dashboard' : 'user-dashboard');
+  }
 });
 
 const serviceChoice = document.getElementById('serviceChoice');

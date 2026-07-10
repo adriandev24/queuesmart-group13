@@ -33,7 +33,7 @@ No backend, server, database, or package installation is required.
 ## Folder structure
 
 ```text
-QueueSmart_A2_Complete/
+queue_smart-frontend/
 ├── index.html
 ├── styles.css
 ├── app.js

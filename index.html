@@ -127,7 +127,7 @@
         </article>
         <article class="metric-card accent-purple">
           <span>Notifications</span>
-          <strong>3</strong>
+          <strong id="notificationCount">3</strong>
           <p>Queue updates available</p>
         </article>
       </div>
@@ -166,18 +166,21 @@
           </div>
         </article>
 
-        <article class="card notification-card">
-          <h2>Notifications</h2>
+        <article class="card notification-card" id="userNotifications">
+          <div class="card-header">
+            <h2>Notifications</h2>
+            <button class="outline-button small-button" id="markAllReadBtn" type="button">Mark all read</button>
+          </div>
           <div class="notice success">
-            <strong>Almost ready</strong>
+            <div class="notice-heading"><strong>Almost ready</strong><button class="dismiss-notice" type="button" aria-label="Dismiss Almost ready notification">Dismiss</button></div>
             <p>You are within 3 people of being served.</p>
           </div>
           <div class="notice info">
-            <strong>Wait time changed</strong>
+            <div class="notice-heading"><strong>Wait time changed</strong><button class="dismiss-notice" type="button" aria-label="Dismiss Wait time changed notification">Dismiss</button></div>
             <p>Financial Aid is running 5 minutes faster.</p>
           </div>
           <div class="notice warning">
-            <strong>Queue reminder</strong>
+            <div class="notice-heading"><strong>Queue reminder</strong><button class="dismiss-notice" type="button" aria-label="Dismiss Queue reminder notification">Dismiss</button></div>
             <p>Stay nearby while your status is active.</p>
           </div>
         </article>
@@ -267,7 +270,25 @@
       </div>
 
       <article class="card">
-        <table class="data-table">
+        <div class="history-filters" aria-label="Filter queue history">
+          <label for="historyServiceFilter">Service
+            <select id="historyServiceFilter">
+              <option value="">All services</option>
+              <option value="ID Card Office">ID Card Office</option>
+              <option value="Financial Aid Desk">Financial Aid Desk</option>
+              <option value="Tech Help Counter">Tech Help Counter</option>
+            </select>
+          </label>
+          <label for="historyOutcomeFilter">Outcome
+            <select id="historyOutcomeFilter">
+              <option value="">All outcomes</option>
+              <option value="Served">Served</option>
+              <option value="Cancelled">Cancelled</option>
+            </select>
+          </label>
+        </div>
+        <p class="history-empty" id="historyEmpty" hidden>No history entries match these filters.</p>
+        <table class="data-table" id="historyTable">
           <thead>
             <tr><th>Date</th><th>Service</th><th>Wait Time</th><th>Outcome</th></tr>
           </thead>

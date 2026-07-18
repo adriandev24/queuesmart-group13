@@ -152,6 +152,53 @@ document.getElementById('leaveQueueBtn').addEventListener('click', () => {
   document.getElementById('joinQueueMessage').textContent = 'You left the selected queue in this UI simulation.';
 });
 
+const notificationCount = document.getElementById('notificationCount');
+const notificationContainer = document.getElementById('userNotifications');
+const markAllReadBtn = document.getElementById('markAllReadBtn');
+
+function updateNotificationCount() {
+  notificationCount.textContent = notificationContainer.querySelectorAll('.notice:not(.read)').length;
+}
+
+markAllReadBtn.addEventListener('click', () => {
+  notificationContainer.querySelectorAll('.notice').forEach((notice) => notice.classList.add('read'));
+  updateNotificationCount();
+  markAllReadBtn.textContent = 'All caught up';
+  markAllReadBtn.disabled = true;
+});
+
+notificationContainer.addEventListener('click', (event) => {
+  if (!event.target.matches('.dismiss-notice')) return;
+
+  event.target.closest('.notice').remove();
+  updateNotificationCount();
+});
+
+const historyServiceFilter = document.getElementById('historyServiceFilter');
+const historyOutcomeFilter = document.getElementById('historyOutcomeFilter');
+const historyRows = document.querySelectorAll('#historyTable tbody tr');
+const historyEmpty = document.getElementById('historyEmpty');
+
+function filterHistory() {
+  let visibleRows = 0;
+
+  historyRows.forEach((row) => {
+    const service = row.cells[1].textContent.trim();
+    const outcome = row.cells[3].textContent.trim();
+    const matchesService = !historyServiceFilter.value || service === historyServiceFilter.value;
+    const matchesOutcome = !historyOutcomeFilter.value || outcome === historyOutcomeFilter.value;
+    const isVisible = matchesService && matchesOutcome;
+
+    row.hidden = !isVisible;
+    if (isVisible) visibleRows += 1;
+  });
+
+  historyEmpty.hidden = visibleRows !== 0;
+}
+
+historyServiceFilter.addEventListener('change', filterHistory);
+historyOutcomeFilter.addEventListener('change', filterHistory);
+
 const serviceForm = document.getElementById('serviceForm');
 serviceForm.addEventListener('submit', (event) => {
   event.preventDefault();

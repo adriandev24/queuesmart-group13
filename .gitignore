@@ -1,0 +1,21 @@
+# Virtual environments
+.venv/
+venv/
+
+# Python temporary files
+__pycache__/
+*.py[cod]
+
+# Test and coverage files
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment variables
+.env
+
+# macOS
+.DS_Store
+
+# VS Code local files
+.vscode/

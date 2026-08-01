@@ -1,71 +1,67 @@
-def test_registers_user_and_returns_token(client):
-    response = client.post(
-        "/api/auth/register",
-        json={
-            "full_name": "Taylor Morgan",
-            "email": "taylor@example.com",
-            "password": "StrongPass123",
-            "role": "user",
-        },
-    )
-    assert response.status_code == 201
-    payload = response.json()
-    assert payload["user"]["email"] == "taylor@example.com"
-    assert payload["user"]["role"] == "user"
-    assert payload["token"]
+import backend.database as database
+from backend.models import UserCredential
 
 
-def test_rejects_duplicate_registration(client):
-    response = client.post(
-        "/api/auth/register",
-        json={
-            "full_name": "Another User",
-            "email": "user@queuesmartapp.com",
-            "password": "StrongPass123",
-            "role": "user",
-        },
-    )
-    assert response.status_code == 409
-    assert "already exists" in response.json()["error"]
-
-
-def test_registration_validates_lengths_types_and_email(client):
-    response = client.post(
-        "/api/auth/register",
-        json={"full_name": "1", "email": "not-an-email", "password": "short", "role": "manager"},
-    )
-    assert response.status_code == 422
-    payload = response.json()
-    assert payload["error"] == "Validation failed"
-    fields = {item["field"] for item in payload["details"]}
-    assert {"full_name", "email", "password", "role"}.issubset(fields)
-
-
-def test_login_authenticates_user(client):
-    response = client.post(
-        "/api/auth/login",
-        json={"email": "user@queuesmartapp.com", "password": "UserPass123", "role": "user"},
-    )
+def test_health_reports_database_connected(client):
+    response = client.get("/api/health")
     assert response.status_code == 200
-    assert response.json()["user"]["full_name"] == "Demo User"
+    assert response.json() == {"status": "ok", "database": "connected", "storage": "SQLite"}
+
+
+def test_register_persists_hashed_password(client):
+    payload = {
+        "full_name": "New Student",
+        "email": "new.student@example.com",
+        "password": "StrongPass9!",
+        "role": "user",
+        "contact_info": "555-0102",
+        "preferences": "Email",
+    }
+    response = client.post("/api/auth/register", json=payload)
+    assert response.status_code == 201
+    with database.SessionLocal() as db:
+        user = db.query(UserCredential).filter_by(email="new.student@example.com").one()
+        assert user.password_hash != payload["password"]
+        assert user.password_hash.startswith("pbkdf2_sha256$")
+        assert user.profile.full_name == "New Student"
+
+
+def test_duplicate_email_is_rejected(client):
+    payload = {"full_name": "Duplicate", "email": "user@queuesmart.example", "password": "Password9!", "role": "user"}
+    response = client.post("/api/auth/register", json=payload)
+    assert response.status_code == 409
+
+
+def test_registration_validates_lengths_and_types(client):
+    response = client.post("/api/auth/register", json={"full_name": "A", "email": "bad", "password": "short", "role": "invalid"})
+    assert response.status_code == 422
+
+
+def test_login_success_and_profile(client, user_headers):
+    response = client.get("/api/profile", headers=user_headers)
+    assert response.status_code == 200
+    assert response.json()["email"] == "user@queuesmart.example"
+    assert response.json()["role"] == "user"
 
 
 def test_login_rejects_wrong_password(client):
-    response = client.post(
-        "/api/auth/login",
-        json={"email": "user@queuesmartapp.com", "password": "WrongPass123", "role": "user"},
-    )
+    response = client.post("/api/auth/login", json={"email": "user@queuesmart.example", "password": "WrongPass9!"})
     assert response.status_code == 401
 
 
-def test_login_rejects_role_mismatch(client):
-    response = client.post(
-        "/api/auth/login",
-        json={"email": "user@queuesmartapp.com", "password": "UserPass123", "role": "administrator"},
-    )
-    assert response.status_code == 403
+def test_missing_and_invalid_tokens_are_rejected(client):
+    assert client.get("/api/profile").status_code == 401
+    assert client.get("/api/profile", headers={"Authorization": "Bearer invalid"}).status_code == 401
 
 
-def test_protected_route_requires_token(client):
-    response = client.get("/api/dashboard/user")
-    assert response.status_code == 401
+def test_profile_update_is_persistent(client, user_headers):
+    response = client.put("/api/profile", headers=user_headers, json={"full_name": "Updated Student", "contact_info": "555-7777", "preferences": "Text"})
+    assert response.status_code == 200
+    second = client.get("/api/profile", headers=user_headers)
+    assert second.json()["full_name"] == "Updated Student"
+    assert second.json()["contact_info"] == "555-7777"
+
+
+def test_logout_invalidates_session(client, user_headers):
+    assert client.post("/api/auth/logout", headers=user_headers).status_code == 200
+    assert client.get("/api/profile", headers=user_headers).status_code == 401

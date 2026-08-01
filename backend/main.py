@@ -1,80 +1,170 @@
+"""QueueSmart FastAPI application with SQLite persistence."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
-from .business import (
-    admin_dashboard,
-    create_service,
-    estimate_wait,
-    join_queue,
-    leave_queue,
-    list_services,
-    login_user,
-    queue_for_admin,
-    register_user,
-    serve_next,
-    update_service,
-    user_dashboard,
-    user_history,
-    user_notifications,
-    user_queue_status,
+from .database import get_db, init_db
+from .models import (
+    History,
+    Notification,
+    Queue,
+    QueueEntry,
+    Service,
+    SessionToken,
+    UserCredential,
+    UserProfile,
 )
-from .models import JoinQueueRequest, LoginRequest, RegisterRequest, ServiceCreateRequest, ServiceUpdateRequest
-from .store import store
+from .schemas import (
+    LoginRequest,
+    MoveQueueEntryRequest,
+    ProfileUpdateRequest,
+    QueueJoinRequest,
+    RegisterRequest,
+    ServiceCreateRequest,
+    ServiceUpdateRequest,
+)
+from .security import create_session_token, hash_password, verify_password
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-FRONTEND_DIR = BASE_DIR / "frontend"
+app = FastAPI(title="QueueSmart API", version="4.0.0")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+FRONTEND_DIR = PROJECT_ROOT / "frontend"
 
-app = FastAPI(title="QueueSmart API", version="1.0.0")
-app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
-
-
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
-    details = []
-    for error in exc.errors():
-        details.append(
-            {
-                "field": ".".join(str(part) for part in error["loc"] if part != "body"),
-                "message": error["msg"],
-                "type": error["type"],
-            }
-        )
-    return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-        content={"error": "Validation failed", "details": details},
-    )
+app.mount("/css", StaticFiles(directory=FRONTEND_DIR / "css"), name="css")
+app.mount("/js", StaticFiles(directory=FRONTEND_DIR / "js"), name="js")
+app.mount("/assets", StaticFiles(directory=FRONTEND_DIR / "assets"), name="assets")
 
 
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
-    return JSONResponse(status_code=exc.status_code, content={"error": exc.detail})
+def now_utc() -> datetime:
+    return datetime.now(timezone.utc)
 
 
-def current_user(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+def _iso(value: datetime | None) -> str | None:
+    return value.isoformat() if value else None
+
+
+def _get_bearer_token(authorization: str | None) -> str:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication token required")
     token = authorization.removeprefix("Bearer ").strip()
-    user_id = store.sessions.get(token)
-    user = store.find_user(user_id) if user_id else None
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired authentication token")
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication token required")
+    return token
+
+
+def current_user(
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> UserCredential:
+    token = _get_bearer_token(authorization)
+    session = db.get(SessionToken, token)
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication token")
+    user = db.get(UserCredential, session.user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User no longer exists")
     return user
 
 
-def require_role(role: str):
-    def dependency(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
-        if user["role"] != role:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"{role.title()} role required")
-        return user
+def require_user(user: UserCredential = Depends(current_user)) -> UserCredential:
+    if user.role != "user":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User role required")
+    return user
 
-    return dependency
+
+def require_admin(user: UserCredential = Depends(current_user)) -> UserCredential:
+    if user.role != "administrator":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator role required")
+    return user
+
+
+def _queue_for_service(db: Session, service_id: int) -> Queue | None:
+    return db.scalar(select(Queue).where(Queue.service_id == service_id).order_by(Queue.created_at.desc(), Queue.id.desc()))
+
+
+def _waiting_entries(db: Session, queue_id: int) -> list[QueueEntry]:
+    return list(
+        db.scalars(
+            select(QueueEntry)
+            .where(QueueEntry.queue_id == queue_id, QueueEntry.status == "waiting")
+            .order_by(QueueEntry.position.asc(), QueueEntry.join_time.asc(), QueueEntry.id.asc())
+        )
+    )
+
+
+def _renumber_queue(db: Session, queue_id: int) -> None:
+    for index, entry in enumerate(_waiting_entries(db, queue_id), start=1):
+        entry.position = index
+
+
+def _service_dict(db: Session, service: Service) -> dict:
+    queue = _queue_for_service(db, service.id)
+    waiting = 0
+    queue_status = "closed"
+    queue_id = None
+    if queue:
+        waiting = db.scalar(
+            select(func.count(QueueEntry.id)).where(QueueEntry.queue_id == queue.id, QueueEntry.status == "waiting")
+        ) or 0
+        queue_status = queue.status
+        queue_id = queue.id
+    return {
+        "id": service.id,
+        "name": service.name,
+        "description": service.description,
+        "expected_duration": service.expected_duration,
+        "priority_level": service.priority_level,
+        "queue_id": queue_id,
+        "queue_status": queue_status,
+        "waiting_count": waiting,
+        "created_at": _iso(service.created_at),
+    }
+
+
+def _entry_status_dict(db: Session, entry: QueueEntry) -> dict:
+    queue = db.get(Queue, entry.queue_id)
+    service = db.get(Service, queue.service_id) if queue else None
+    return {
+        "entry_id": entry.id,
+        "queue_id": entry.queue_id,
+        "service_id": service.id if service else None,
+        "service_name": service.name if service else "Unknown service",
+        "position": entry.position,
+        "estimated_wait": entry.position * service.expected_duration if service else 0,
+        "status": entry.status,
+        "join_time": _iso(entry.join_time),
+        "reason_for_visit": entry.reason_for_visit,
+    }
+
+
+def _create_history(db: Session, entry: QueueEntry, outcome: str) -> History:
+    queue = db.get(Queue, entry.queue_id)
+    completed = entry.completed_at or now_utc()
+    joined = entry.join_time
+    # SQLite may return a naive datetime even when timezone=True.
+    if joined.tzinfo is None:
+        joined = joined.replace(tzinfo=timezone.utc)
+    if completed.tzinfo is None:
+        completed = completed.replace(tzinfo=timezone.utc)
+    wait_minutes = max(0, int((completed - joined).total_seconds() // 60))
+    record = History(
+        user_id=entry.user_id,
+        service_id=queue.service_id,
+        queue_entry_id=entry.id,
+        joined_at=entry.join_time,
+        completed_at=entry.completed_at or completed,
+        outcome=outcome,
+        wait_minutes=wait_minutes,
+    )
+    db.add(record)
+    return record
 
 
 @app.get("/", include_in_schema=False)
@@ -83,101 +173,423 @@ def frontend() -> FileResponse:
 
 
 @app.get("/api/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "storage": "in-memory"}
+def health(db: Session = Depends(get_db)) -> dict:
+    db.execute(select(1))
+    return {"status": "ok", "database": "connected", "storage": "SQLite"}
 
 
 @app.post("/api/auth/register", status_code=status.HTTP_201_CREATED)
-def register(data: RegisterRequest) -> dict[str, Any]:
-    user, token = register_user(data, store)
-    return {"message": "Registration successful", "token": token, "user": user}
+def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> dict:
+    email = str(payload.email).lower()
+    if db.scalar(select(UserCredential).where(UserCredential.email == email)):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email is already registered")
+
+    user = UserCredential(
+        email=email,
+        password_hash=hash_password(payload.password),
+        role=payload.role,
+        profile=UserProfile(
+            full_name=payload.full_name,
+            contact_info=payload.contact_info,
+            preferences=payload.preferences,
+        ),
+    )
+    db.add(user)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Unable to create account") from exc
+    db.refresh(user)
+    return {"id": user.id, "email": user.email, "role": user.role, "full_name": user.profile.full_name}
 
 
 @app.post("/api/auth/login")
-def login(data: LoginRequest) -> dict[str, Any]:
-    user, token = login_user(data, store)
-    return {"message": "Login successful", "token": token, "user": user}
+def login(payload: LoginRequest, db: Session = Depends(get_db)) -> dict:
+    user = db.scalar(select(UserCredential).where(UserCredential.email == str(payload.email).lower()))
+    if user is None or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+    token = create_session_token()
+    db.add(SessionToken(token=token, user_id=user.id))
+    db.commit()
+    return {
+        "token": token,
+        "user": {"id": user.id, "email": user.email, "role": user.role, "full_name": user.profile.full_name},
+    }
+
+
+@app.post("/api/auth/logout")
+def logout(
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+    _user: UserCredential = Depends(current_user),
+) -> dict:
+    token = _get_bearer_token(authorization)
+    session = db.get(SessionToken, token)
+    if session:
+        db.delete(session)
+        db.commit()
+    return {"message": "Logged out"}
+
+
+@app.get("/api/profile")
+def get_profile(user: UserCredential = Depends(current_user)) -> dict:
+    return {
+        "id": user.id,
+        "email": user.email,
+        "role": user.role,
+        "full_name": user.profile.full_name,
+        "contact_info": user.profile.contact_info,
+        "preferences": user.profile.preferences,
+    }
+
+
+@app.put("/api/profile")
+def update_profile(
+    payload: ProfileUpdateRequest,
+    user: UserCredential = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    profile = db.get(UserProfile, user.profile.id)
+    profile.full_name = payload.full_name
+    profile.contact_info = payload.contact_info
+    profile.preferences = payload.preferences
+    db.commit()
+    return get_profile(user)
 
 
 @app.get("/api/services")
-def services() -> dict[str, Any]:
-    return {"services": list_services(store)}
-
-
-@app.get("/api/services/{service_id}/estimate")
-def service_estimate(service_id: int) -> dict[str, int]:
-    return estimate_wait(service_id, store)
+def list_services(db: Session = Depends(get_db)) -> list[dict]:
+    priority_order = {"high": 0, "medium": 1, "low": 2}
+    services = list(db.scalars(select(Service).order_by(Service.name.asc())))
+    services.sort(key=lambda service: (priority_order[service.priority_level], service.name.lower()))
+    return [_service_dict(db, service) for service in services]
 
 
 @app.post("/api/services", status_code=status.HTTP_201_CREATED)
-def add_service(
-    data: ServiceCreateRequest,
-    admin: dict[str, Any] = Depends(require_role("administrator")),
-) -> dict[str, Any]:
-    return {"message": "Service created", "service": create_service(data, store)}
+def create_service(
+    payload: ServiceCreateRequest,
+    _admin: UserCredential = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    service = Service(**payload.model_dump())
+    service.queues.append(Queue(status="open"))
+    db.add(service)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Service name must be unique") from exc
+    db.refresh(service)
+    return _service_dict(db, service)
 
 
 @app.put("/api/services/{service_id}")
-def edit_service(
+def update_service(
     service_id: int,
-    data: ServiceUpdateRequest,
-    admin: dict[str, Any] = Depends(require_role("administrator")),
-) -> dict[str, Any]:
-    return {"message": "Service updated", "service": update_service(service_id, data, store)}
+    payload: ServiceUpdateRequest,
+    _admin: UserCredential = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    service = db.get(Service, service_id)
+    if service is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
+    for field, value in payload.model_dump().items():
+        setattr(service, field, value)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Service name must be unique") from exc
+    return _service_dict(db, service)
+
+
+@app.post("/api/services/{service_id}/queue/toggle")
+def toggle_queue(
+    service_id: int,
+    _admin: UserCredential = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    service = db.get(Service, service_id)
+    if service is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
+    queue = _queue_for_service(db, service_id)
+    if queue is None:
+        queue = Queue(service_id=service_id, status="open")
+        db.add(queue)
+    else:
+        queue.status = "closed" if queue.status == "open" else "open"
+    db.commit()
+    return _service_dict(db, service)
+
+
+@app.get("/api/services/{service_id}/estimate")
+def estimate_wait(service_id: int, db: Session = Depends(get_db)) -> dict:
+    service = db.get(Service, service_id)
+    if service is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
+    queue = _queue_for_service(db, service_id)
+    waiting = len(_waiting_entries(db, queue.id)) if queue else 0
+    next_position = waiting + 1
+    return {
+        "service_id": service.id,
+        "service_name": service.name,
+        "position": next_position,
+        "estimated_wait": next_position * service.expected_duration,
+        "queue_status": queue.status if queue else "closed",
+    }
 
 
 @app.post("/api/queues/join", status_code=status.HTTP_201_CREATED)
-def queue_join(
-    data: JoinQueueRequest,
-    user: dict[str, Any] = Depends(require_role("user")),
-) -> dict[str, Any]:
-    return {"message": "Queue joined", "queue_entry": join_queue(user, data, store)}
+def join_queue(
+    payload: QueueJoinRequest,
+    user: UserCredential = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    service = db.get(Service, payload.service_id)
+    if service is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
+    active = db.scalar(
+        select(QueueEntry).where(QueueEntry.user_id == user.id, QueueEntry.status == "waiting")
+    )
+    if active:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User is already waiting in a queue")
+    queue = _queue_for_service(db, service.id)
+    if queue is None or queue.status != "open":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Queue is closed")
+    position = len(_waiting_entries(db, queue.id)) + 1
+    entry = QueueEntry(
+        queue_id=queue.id,
+        user_id=user.id,
+        position=position,
+        reason_for_visit=payload.reason_for_visit,
+        status="waiting",
+    )
+    db.add(entry)
+    db.flush()
+    db.add(Notification(user_id=user.id, message=f"You joined {service.name} at position {position}."))
+    if position <= 3:
+        db.add(Notification(user_id=user.id, message=f"Almost ready: you are close to being served by {service.name}."))
+    db.commit()
+    db.refresh(entry)
+    return _entry_status_dict(db, entry)
 
 
-@app.delete("/api/queues/{service_id}/leave")
-def queue_leave(
-    service_id: int,
-    user: dict[str, Any] = Depends(require_role("user")),
-) -> dict[str, Any]:
-    return {"message": "Queue left", "history": leave_queue(user, service_id, store)}
+@app.delete("/api/queues/{queue_id}/leave")
+def leave_queue(
+    queue_id: int,
+    user: UserCredential = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    entry = db.scalar(
+        select(QueueEntry).where(
+            QueueEntry.queue_id == queue_id,
+            QueueEntry.user_id == user.id,
+            QueueEntry.status == "waiting",
+        )
+    )
+    if entry is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Active queue entry not found")
+    entry.status = "canceled"
+    entry.completed_at = now_utc()
+    queue = db.get(Queue, queue_id)
+    service = db.get(Service, queue.service_id)
+    _create_history(db, entry, "canceled")
+    db.add(Notification(user_id=user.id, message=f"You left the {service.name} queue."))
+    db.flush()
+    _renumber_queue(db, queue_id)
+    db.commit()
+    return {"message": "Queue entry canceled", "entry_id": entry.id}
 
 
 @app.get("/api/queues/status")
-def queue_status(user: dict[str, Any] = Depends(require_role("user"))) -> dict[str, Any]:
-    return {"queue_status": user_queue_status(user, store)}
+def queue_status(
+    user: UserCredential = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    entry = db.scalar(
+        select(QueueEntry).where(QueueEntry.user_id == user.id, QueueEntry.status == "waiting")
+    )
+    if entry is None:
+        return {"active": False}
+    return {"active": True, **_entry_status_dict(db, entry)}
+
+
+@app.get("/api/notifications")
+def notifications(
+    user: UserCredential = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    records = list(
+        db.scalars(
+            select(Notification)
+            .where(Notification.user_id == user.id)
+            .order_by(Notification.timestamp.desc(), Notification.id.desc())
+        )
+    )
+    return [
+        {"id": item.id, "message": item.message, "timestamp": _iso(item.timestamp), "status": item.status}
+        for item in records
+    ]
+
+
+@app.post("/api/notifications/{notification_id}/view")
+def view_notification(
+    notification_id: int,
+    user: UserCredential = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    item = db.get(Notification, notification_id)
+    if item is None or item.user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found")
+    item.status = "viewed"
+    db.commit()
+    return {"id": item.id, "status": item.status}
+
+
+@app.get("/api/history")
+def history(
+    user: UserCredential = Depends(require_user),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    records = list(
+        db.scalars(
+            select(History)
+            .where(History.user_id == user.id)
+            .order_by(History.completed_at.desc(), History.id.desc())
+        )
+    )
+    return [
+        {
+            "id": record.id,
+            "service_name": record.service.name,
+            "joined_at": _iso(record.joined_at),
+            "completed_at": _iso(record.completed_at),
+            "outcome": record.outcome,
+            "wait_minutes": record.wait_minutes,
+        }
+        for record in records
+    ]
+
+
+@app.get("/api/admin/dashboard")
+def admin_dashboard(
+    _admin: UserCredential = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    services = list_services(db)
+    open_queues = sum(1 for service in services if service["queue_status"] == "open")
+    total_waiting = sum(service["waiting_count"] for service in services)
+    longest_wait = max(
+        (service["waiting_count"] * service["expected_duration"] for service in services),
+        default=0,
+    )
+    return {
+        "open_queues": open_queues,
+        "total_waiting": total_waiting,
+        "longest_estimated_wait": longest_wait,
+        "services": services,
+    }
 
 
 @app.get("/api/admin/queues/{service_id}")
 def admin_queue(
     service_id: int,
-    admin: dict[str, Any] = Depends(require_role("administrator")),
-) -> dict[str, Any]:
-    return {"queue": queue_for_admin(service_id, store)}
+    _admin: UserCredential = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    service = db.get(Service, service_id)
+    if service is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
+    queue = _queue_for_service(db, service_id)
+    if queue is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Queue not found")
+    entries = _waiting_entries(db, queue.id)
+    return {
+        "queue_id": queue.id,
+        "service_id": service.id,
+        "service_name": service.name,
+        "status": queue.status,
+        "entries": [
+            {
+                "entry_id": entry.id,
+                "user_id": entry.user_id,
+                "full_name": entry.user.profile.full_name,
+                "email": entry.user.email,
+                "position": entry.position,
+                "join_time": _iso(entry.join_time),
+                "reason_for_visit": entry.reason_for_visit,
+            }
+            for entry in entries
+        ],
+    }
 
 
 @app.post("/api/admin/queues/{service_id}/serve-next")
-def admin_serve_next(
+def serve_next(
     service_id: int,
-    admin: dict[str, Any] = Depends(require_role("administrator")),
-) -> dict[str, Any]:
-    return {"message": "Next user served", **serve_next(service_id, store)}
+    _admin: UserCredential = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    service = db.get(Service, service_id)
+    if service is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
+    queue = _queue_for_service(db, service_id)
+    if queue is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Queue not found")
+    entries = _waiting_entries(db, queue.id)
+    if not entries:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No users are waiting")
+    entry = entries[0]
+    entry.status = "served"
+    entry.completed_at = now_utc()
+    _create_history(db, entry, "served")
+    db.add(Notification(user_id=entry.user_id, message=f"You were served by {service.name}."))
+    db.flush()
+    _renumber_queue(db, queue.id)
+    db.commit()
+    return {"message": "Next user served", "entry_id": entry.id, "user_id": entry.user_id}
 
 
-@app.get("/api/notifications")
-def notifications(user: dict[str, Any] = Depends(require_role("user"))) -> dict[str, Any]:
-    return {"notifications": user_notifications(user, store)}
+@app.delete("/api/admin/queue-entries/{entry_id}")
+def remove_queue_entry(
+    entry_id: int,
+    _admin: UserCredential = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    entry = db.get(QueueEntry, entry_id)
+    if entry is None or entry.status != "waiting":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Waiting queue entry not found")
+    entry.status = "canceled"
+    entry.completed_at = now_utc()
+    queue = db.get(Queue, entry.queue_id)
+    service = db.get(Service, queue.service_id)
+    _create_history(db, entry, "canceled")
+    db.add(Notification(user_id=entry.user_id, message=f"An administrator removed you from {service.name}."))
+    db.flush()
+    _renumber_queue(db, entry.queue_id)
+    db.commit()
+    return {"message": "Queue entry removed", "entry_id": entry.id}
 
 
-@app.get("/api/history")
-def history(user: dict[str, Any] = Depends(require_role("user"))) -> dict[str, Any]:
-    return {"history": user_history(user, store)}
+@app.post("/api/admin/queue-entries/{entry_id}/move")
+def move_queue_entry(
+    entry_id: int,
+    payload: MoveQueueEntryRequest,
+    _admin: UserCredential = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    entry = db.get(QueueEntry, entry_id)
+    if entry is None or entry.status != "waiting":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Waiting queue entry not found")
+    entries = _waiting_entries(db, entry.queue_id)
+    entries.remove(entry)
+    target_index = min(payload.position - 1, len(entries))
+    entries.insert(target_index, entry)
+    for index, item in enumerate(entries, start=1):
+        item.position = index
+    db.commit()
+    return {"entry_id": entry.id, "position": entry.position}
 
 
-@app.get("/api/dashboard/user")
-def dashboard_user(user: dict[str, Any] = Depends(require_role("user"))) -> dict[str, Any]:
-    return user_dashboard(user, store)
-
-
-@app.get("/api/dashboard/admin")
-def dashboard_admin(admin: dict[str, Any] = Depends(require_role("administrator"))) -> dict[str, Any]:
-    return admin_dashboard(store)
+init_db(seed=True)

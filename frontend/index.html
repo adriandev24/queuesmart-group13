@@ -1,181 +1,144 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="QueueSmart smart queue management application" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>QueueSmart</title>
-  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
   <header class="topbar">
-    <button id="menuButton" class="icon-button" aria-label="Open navigation" aria-expanded="false">☰</button>
-    <img class="logo" src="/static/assets/queuesmart-logo.svg" alt="QueueSmart" />
-    <div class="topbar-spacer"></div>
-    <span id="sessionBadge" class="session-badge">Not signed in</span>
-    <button id="logoutButton" class="ghost-button hidden" type="button">Log out</button>
+    <button id="menuButton" class="icon-button" aria-label="Open navigation">☰</button>
+    <img src="/assets/queuesmart-logo.svg" alt="QueueSmart" class="logo">
+    <span class="pill">A4 Database Build</span>
+    <span id="sessionLabel" class="session-label">Not signed in</span>
   </header>
 
-  <div id="drawerBackdrop" class="drawer-backdrop hidden"></div>
-  <aside id="drawer" class="drawer" aria-label="Main navigation">
-    <nav>
-      <button data-screen="login">Login</button>
-      <button data-screen="register">Register</button>
-      <div class="nav-label">User</div>
-      <button data-screen="user-dashboard" data-role="user">Dashboard</button>
-      <button data-screen="join-queue" data-role="user">Join Queue</button>
-      <button data-screen="queue-status" data-role="user">Queue Status</button>
-      <button data-screen="history" data-role="user">History</button>
-      <div class="nav-label">Administrator</div>
-      <button data-screen="admin-dashboard" data-role="administrator">Dashboard</button>
-      <button data-screen="service-management" data-role="administrator">Services</button>
-      <button data-screen="queue-management" data-role="administrator">Queue Management</button>
-    </nav>
+  <aside id="sidebar" class="sidebar" aria-label="Main navigation">
+    <button data-screen="login">Login</button>
+    <button data-screen="register">Registration</button>
+    <div class="nav-user hidden">
+      <button data-screen="user-dashboard">User Dashboard</button>
+      <button data-screen="join-queue">Join Queue</button>
+      <button data-screen="queue-status">Queue Status</button>
+      <button data-screen="history">History</button>
+    </div>
+    <div class="nav-admin hidden">
+      <button data-screen="admin-dashboard">Admin Dashboard</button>
+      <button data-screen="service-management">Service Management</button>
+      <button data-screen="queue-management">Queue Management</button>
+    </div>
+    <button id="logoutButton" class="danger hidden">Log out</button>
   </aside>
 
-  <main class="page-shell">
-    <div id="globalMessage" class="global-message hidden" role="status"></div>
+  <main>
+    <div id="message" class="message hidden" role="status"></div>
 
-    <section id="login" class="screen auth-layout">
-      <div class="hero-card">
-        <p class="eyebrow light">Welcome back</p>
-        <h1>Sign in to check your queue.</h1>
-        <p>QueueSmart connects users and administrators to live service and queue information returned by the backend API.</p>
-        <div class="demo-box">
-          <b>Demo accounts</b>
-          <span>User: user@queuesmartapp.com / UserPass123</span>
-          <span>Admin: admin@queuesmartapp.com / AdminPass123</span>
-        </div>
-      </div>
-      <div class="form-card">
-        <h2>Login</h2>
-        <form id="loginForm" class="form-stack">
-          <label>Email<input id="loginEmail" type="email" required maxlength="254" autocomplete="email" /></label>
-          <label>Password<input id="loginPassword" type="password" required minlength="8" maxlength="72" autocomplete="current-password" /></label>
-          <label>Role
-            <select id="loginRole" required>
-              <option value="">Choose a role</option>
-              <option value="user">User</option>
-              <option value="administrator">Administrator</option>
-            </select>
-          </label>
-          <button class="primary-button" type="submit">Continue</button>
-        </form>
-        <p class="small-copy">Need an account? <button class="text-button" data-screen="register">Create one</button></p>
-      </div>
-    </section>
-
-    <section id="register" class="screen auth-layout hidden">
-      <div class="form-card">
-        <h2>Create Account</h2>
-        <form id="registerForm" class="form-stack">
-          <label>Full Name<input id="registerName" type="text" required minlength="2" maxlength="80" /></label>
-          <label>Email<input id="registerEmail" type="email" required maxlength="254" autocomplete="email" /></label>
-          <label>Password<input id="registerPassword" type="password" required minlength="8" maxlength="72" autocomplete="new-password" /></label>
-          <label>Account Type
-            <select id="registerRole" required>
-              <option value="">Choose a role</option>
-              <option value="user">User</option>
-              <option value="administrator">Administrator</option>
-            </select>
-          </label>
-          <button class="primary-button" type="submit">Register</button>
+    <section id="login" class="screen active">
+      <div class="hero-grid">
+        <article class="hero-card gradient-card">
+          <p class="eyebrow">WELCOME BACK</p>
+          <h1>Sign in to check your queue.</h1>
+          <p>QueueSmart now stores users, services, queue entries, notifications, and history in SQLite.</p>
+          <div class="demo-box">
+            <strong>Demo accounts</strong>
+            <span>User: user@queuesmart.example / User123!</span>
+            <span>Admin: admin@queuesmart.example / Admin123!</span>
+          </div>
+        </article>
+        <form id="loginForm" class="card form-card">
+          <h2>Login</h2>
+          <label>Email<input id="loginEmail" type="email" required maxlength="254" value="user@queuesmart.example"></label>
+          <label>Password<input id="loginPassword" type="password" required minlength="8" maxlength="72" value="User123!"></label>
+          <button class="primary" type="submit">Continue</button>
+          <button class="link-button" type="button" data-screen="register">Need an account? Create one</button>
         </form>
       </div>
-      <div class="hero-card">
-        <p class="eyebrow light">New visitor</p>
-        <h1>Choose one account for all services.</h1>
-        <p>Registration, role handling, and field validation are processed by the QueueSmart backend.</p>
-        <ul class="check-list">
-          <li>Email validation</li>
-          <li>Password length checks</li>
-          <li>User and administrator roles</li>
-        </ul>
+    </section>
+
+    <section id="register" class="screen">
+      <div class="hero-grid reverse">
+        <form id="registerForm" class="card form-card">
+          <h2>Create Account</h2>
+          <label>Full Name<input id="registerName" required minlength="2" maxlength="80"></label>
+          <label>Email<input id="registerEmail" type="email" required maxlength="254"></label>
+          <label>Password<input id="registerPassword" type="password" required minlength="8" maxlength="72"></label>
+          <label>Account Type<select id="registerRole" required><option value="user">User</option><option value="administrator">Administrator</option></select></label>
+          <label>Contact Information (optional)<input id="registerContact" maxlength="120"></label>
+          <button class="primary" type="submit">Register</button>
+        </form>
+        <article class="hero-card gradient-card">
+          <p class="eyebrow">NEW VISITOR</p>
+          <h1>Create one account for all services.</h1>
+          <p>Backend and database validation enforce required fields, data types, length limits, roles, and unique email addresses.</p>
+        </article>
       </div>
     </section>
 
-    <section id="user-dashboard" class="screen hidden">
-      <div class="page-header">
-        <div><p class="eyebrow">User</p><h1>Dashboard</h1><p>Current queue status, active services, and notifications from the API.</p></div>
-        <button class="primary-button" data-screen="join-queue">Join a Queue</button>
+    <section id="user-dashboard" class="screen protected user-only">
+      <div class="section-heading"><div><p class="eyebrow">USER</p><h1>Dashboard</h1><p>Live information retrieved from the database.</p></div></div>
+      <div class="stat-grid">
+        <article class="stat blue"><span>Current Position</span><strong id="dashPosition">-</strong><small id="dashService">No active queue</small></article>
+        <article class="stat teal"><span>Estimated Wait</span><strong id="dashWait">0 min</strong><small>Calculated by the backend</small></article>
+        <article class="stat purple"><span>Notifications</span><strong id="dashNotificationCount">0</strong><small>Stored notification records</small></article>
       </div>
-      <div id="userStats" class="stats-grid"></div>
-      <div class="content-grid two-thirds">
-        <article class="panel"><div class="panel-heading"><h2>Active Services</h2></div><div id="dashboardServices"></div></article>
-        <article class="panel"><div class="panel-heading"><h2>Notifications</h2></div><div id="dashboardNotifications"></div></article>
-      </div>
-    </section>
-
-    <section id="join-queue" class="screen hidden">
-      <div class="page-header"><div><p class="eyebrow">User</p><h1>Join Queue</h1><p>Select a service, preview the backend wait estimate, then join.</p></div></div>
       <div class="content-grid">
-        <article class="panel">
+        <article class="card"><div class="card-title"><h2>Active Services</h2><button class="link-button" data-screen="join-queue">Join a Queue</button></div><div id="dashboardServices" class="list"></div></article>
+        <article class="card"><h2>Notifications</h2><div id="dashboardNotifications" class="list"></div></article>
+      </div>
+    </section>
+
+    <section id="join-queue" class="screen protected user-only">
+      <div class="section-heading"><div><p class="eyebrow">USER</p><h1>Join Queue</h1><p>Select a service, preview the database-backed wait, then join.</p></div></div>
+      <div class="content-grid">
+        <form id="joinForm" class="card form-card">
           <h2>Service Selection</h2>
-          <form id="joinQueueForm" class="form-stack">
-            <label>Service<select id="joinService" required><option value="">Choose a service</option></select></label>
-            <label>Reason for Visit<input id="joinReason" type="text" required minlength="2" maxlength="200" /></label>
-            <div class="estimate-card"><span>Estimated Wait</span><strong id="joinEstimate">Select a service</strong><small id="joinPosition">Backend calculation: position × expected duration</small></div>
-            <button class="primary-button" type="submit">Join Queue</button>
-            <button id="leaveQueueButton" class="secondary-button" type="button">Leave Queue</button>
-          </form>
-        </article>
-        <article class="panel">
-          <h2>Live Queue Preview</h2>
-          <div id="queuePreview" class="queue-preview"><span>1</span><span>2</span><span>3</span><span class="you">You</span><span>5</span></div>
-          <p class="muted">Your real position is returned after the join request is accepted.</p>
-        </article>
+          <label>Service<select id="joinService" required></select></label>
+          <label>Reason for Visit<input id="joinReason" required minlength="2" maxlength="200" placeholder="Brief reason"></label>
+          <div class="estimate"><span>Estimated Wait</span><strong id="joinEstimate">Select a service</strong></div>
+          <button class="primary" type="submit">Join Queue</button>
+          <button id="leaveQueueButton" class="secondary" type="button">Leave Current Queue</button>
+        </form>
+        <article class="card"><h2>Live Queue Preview</h2><div id="queuePreview" class="queue-preview"><span>Choose an open service.</span></div><p class="muted">The preview is generated from current database counts.</p></article>
       </div>
     </section>
 
-    <section id="queue-status" class="screen hidden">
-      <div class="page-header"><div><p class="eyebrow">User</p><h1>Queue Status</h1><p>Current position, estimated wait, and status updates.</p></div><button id="refreshStatusButton" class="secondary-button">Refresh</button></div>
-      <div id="statusContent" class="content-grid"></div>
-    </section>
-
-    <section id="history" class="screen hidden">
-      <div class="page-header"><div><p class="eyebrow">User</p><h1>Queue History</h1><p>Past queue participation stored in memory by the backend.</p></div></div>
-      <article class="panel table-panel"><div id="historyTable"></div></article>
-    </section>
-
-    <section id="admin-dashboard" class="screen hidden">
-      <div class="page-header"><div><p class="eyebrow">Administrator</p><h1>Admin Dashboard</h1><p>Service and queue totals returned by the backend.</p></div><button class="primary-button" data-screen="service-management">Manage Services</button></div>
-      <div id="adminStats" class="stats-grid"></div>
-      <article class="panel table-panel"><h2>Service Queue Summary</h2><div id="adminServiceTable"></div></article>
-    </section>
-
-    <section id="service-management" class="screen hidden">
-      <div class="page-header"><div><p class="eyebrow">Administrator</p><h1>Service Management</h1><p>Create or update services with backend validation.</p></div></div>
+    <section id="queue-status" class="screen protected user-only">
+      <div class="section-heading"><div><p class="eyebrow">USER</p><h1>Queue Status</h1><p>Your active queue record and calculated wait time.</p></div></div>
       <div class="content-grid">
-        <article class="panel">
-          <h2 id="serviceFormTitle">Create Service</h2>
-          <form id="serviceForm" class="form-stack">
-            <input id="editingServiceId" type="hidden" />
-            <label>Service Name<input id="serviceName" type="text" required minlength="2" maxlength="100" /></label>
-            <label>Description<textarea id="serviceDescription" required minlength="5" maxlength="250"></textarea></label>
-            <label>Expected Duration (minutes)<input id="serviceDuration" type="number" required min="1" max="120" /></label>
-            <label>Priority Level
-              <select id="servicePriority" required>
-                <option value="">Choose priority</option>
-                <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
-              </select>
-            </label>
-            <button class="primary-button" type="submit">Save Service</button>
-            <button id="cancelEditButton" class="secondary-button hidden" type="button">Cancel Edit</button>
-          </form>
-        </article>
-        <article class="panel"><h2>Existing Services</h2><div id="serviceCards"></div></article>
+        <article id="statusTicket" class="hero-card gradient-card"><p class="eyebrow">ACTIVE TICKET</p><h2 id="statusService">No active queue</h2><strong id="statusTicketId" class="ticket-id">-</strong><div class="mini-stat-grid"><span>Position <b id="statusPosition">-</b></span><span>Wait <b id="statusWait">-</b></span><span>Status <b id="statusState">-</b></span></div></article>
+        <article class="card"><h2>Status Updates</h2><ol class="timeline"><li>Joined - queue entry stored</li><li>Waiting - position retrieved from SQLite</li><li>Almost Ready - notification generated near the front</li><li>Served - record moved into history</li></ol></article>
       </div>
     </section>
 
-    <section id="queue-management" class="screen hidden">
-      <div class="page-header"><div><p class="eyebrow">Administrator</p><h1>Queue Management</h1><p>View priority-ordered queues and serve the next user.</p></div><button id="serveNextButton" class="primary-button">Serve Next User</button></div>
-      <article class="panel table-panel">
-        <label class="compact-label">Selected Service<select id="adminQueueService"></select></label>
-        <div id="adminQueueTable"></div>
-      </article>
+    <section id="history" class="screen protected user-only">
+      <div class="section-heading"><div><p class="eyebrow">USER</p><h1>Queue History</h1><p>Completed and canceled queue records persisted in the database.</p></div></div>
+      <article class="card table-wrap"><table><thead><tr><th>Date</th><th>Service</th><th>Wait Time</th><th>Outcome</th></tr></thead><tbody id="historyBody"></tbody></table></article>
+    </section>
+
+    <section id="admin-dashboard" class="screen protected admin-only">
+      <div class="section-heading"><div><p class="eyebrow">ADMINISTRATOR</p><h1>Admin Dashboard</h1><p>Overview of services and current queue counts.</p></div></div>
+      <div class="stat-grid"><article class="stat blue"><span>Open Queues</span><strong id="adminOpen">0</strong></article><article class="stat teal"><span>Total Waiting</span><strong id="adminWaiting">0</strong></article><article class="stat orange"><span>Longest Wait</span><strong id="adminLongest">0 min</strong></article></div>
+      <article class="card"><div class="card-title"><h2>Service Queue Summary</h2><button class="link-button" data-screen="service-management">Manage Services</button></div><div id="adminServiceSummary" class="service-grid"></div></article>
+    </section>
+
+    <section id="service-management" class="screen protected admin-only">
+      <div class="section-heading"><div><p class="eyebrow">ADMINISTRATOR</p><h1>Service Management</h1><p>Create or edit services with backend and database validation.</p></div></div>
+      <div class="content-grid">
+        <form id="serviceForm" class="card form-card"><h2>Create Service</h2><label>Service Name<input id="serviceName" required minlength="2" maxlength="100"></label><label>Description<textarea id="serviceDescription" required minlength="5" maxlength="250"></textarea></label><label>Expected Duration (minutes)<input id="serviceDuration" type="number" required min="1" max="120"></label><label>Priority Level<select id="servicePriority" required><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label><button class="primary" type="submit">Save Service</button></form>
+        <article class="card"><h2>Existing Services</h2><div id="serviceList" class="list"></div></article>
+      </div>
+    </section>
+
+    <section id="queue-management" class="screen protected admin-only">
+      <div class="section-heading"><div><p class="eyebrow">ADMINISTRATOR</p><h1>Queue Management</h1><p>View waiting users, reorder entries, remove users, and serve next.</p></div></div>
+      <div class="content-grid">
+        <article class="card"><div class="card-title"><h2>Selected Queue</h2><select id="adminQueueService"></select></div><button id="serveNextButton" class="primary">Serve Next User</button><div id="adminQueueEntries" class="list"></div></article>
+        <article class="card"><h2>Database Activity</h2><p>Every queue action updates queue entries, positions, notifications, and history in one database transaction.</p><div id="adminActivity" class="notice">Choose a service to load its queue.</div></article>
+      </div>
     </section>
   </main>
 
-  <script src="/static/app.js"></script>
+  <script src="/js/app.js"></script>
 </body>
 </html>

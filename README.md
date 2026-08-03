@@ -45,9 +45,4 @@ coverage report -m
 
 The included test suite checks authentication, database constraints, service persistence, queue persistence, notifications, history, role authorization, and front-end serving.
 
-## Assignment 4 Submission
 
-1. Push the complete repository to the existing QueueSmart GitHub repository.
-2. Ensure all four team members make meaningful commits that match the contribution table.
-3. Replace the GitHub placeholder in the Word/PDF submission document.
-4. Upload only the final Word or PDF document to Canvas; do not upload the source ZIP to Canvas.

@@ -18,20 +18,15 @@ from .models import (
     Queue,
     QueueEntry,
     Service,
-    SessionToken,
     UserCredential,
-    UserProfile,
 )
 from .schemas import (
-    LoginRequest,
     MoveQueueEntryRequest,
     ProfileUpdateRequest,
     QueueJoinRequest,
-    RegisterRequest,
     ServiceCreateRequest,
     ServiceUpdateRequest,
 )
-from .security import create_session_token, hash_password, verify_password
 
 app = FastAPI(title="QueueSmart API", version="4.0.0")
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -50,26 +45,15 @@ def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
 
 
-def _get_bearer_token(authorization: str | None) -> str:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication token required")
-    token = authorization.removeprefix("Bearer ").strip()
-    if not token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication token required")
-    return token
-
-
 def current_user(
-    authorization: str | None = Header(default=None),
+    x_user_email: str | None = Header(default=None, alias="X-User-Email"),
     db: Session = Depends(get_db),
 ) -> UserCredential:
-    token = _get_bearer_token(authorization)
-    session = db.get(SessionToken, token)
-    if session is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication token")
-    user = db.get(UserCredential, session.user_id)
+    if not x_user_email:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User email required")
+    user = db.scalar(select(UserCredential).where(UserCredential.email == x_user_email.lower()))
     if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User no longer exists")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user email")
     return user
 
 
@@ -176,60 +160,6 @@ def frontend() -> FileResponse:
 def health(db: Session = Depends(get_db)) -> dict:
     db.execute(select(1))
     return {"status": "ok", "database": "connected", "storage": "SQLite"}
-
-
-@app.post("/api/auth/register", status_code=status.HTTP_201_CREATED)
-def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> dict:
-    email = str(payload.email).lower()
-    if db.scalar(select(UserCredential).where(UserCredential.email == email)):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email is already registered")
-
-    user = UserCredential(
-        email=email,
-        password_hash=hash_password(payload.password),
-        role=payload.role,
-        profile=UserProfile(
-            full_name=payload.full_name,
-            contact_info=payload.contact_info,
-            preferences=payload.preferences,
-        ),
-    )
-    db.add(user)
-    try:
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Unable to create account") from exc
-    db.refresh(user)
-    return {"id": user.id, "email": user.email, "role": user.role, "full_name": user.profile.full_name}
-
-
-@app.post("/api/auth/login")
-def login(payload: LoginRequest, db: Session = Depends(get_db)) -> dict:
-    user = db.scalar(select(UserCredential).where(UserCredential.email == str(payload.email).lower()))
-    if user is None or not verify_password(payload.password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
-    token = create_session_token()
-    db.add(SessionToken(token=token, user_id=user.id))
-    db.commit()
-    return {
-        "token": token,
-        "user": {"id": user.id, "email": user.email, "role": user.role, "full_name": user.profile.full_name},
-    }
-
-
-@app.post("/api/auth/logout")
-def logout(
-    authorization: str | None = Header(default=None),
-    db: Session = Depends(get_db),
-    _user: UserCredential = Depends(current_user),
-) -> dict:
-    token = _get_bearer_token(authorization)
-    session = db.get(SessionToken, token)
-    if session:
-        db.delete(session)
-        db.commit()
-    return {"message": "Logged out"}
 
 
 @app.get("/api/profile")

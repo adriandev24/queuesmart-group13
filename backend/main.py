@@ -180,7 +180,7 @@ def health(db: Session = Depends(get_db)) -> dict:
 
 @app.post("/api/auth/register", status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> dict:
-    email = str(payload.email).lower()
+    email = str(payload.email).strip().lower()
     if db.scalar(select(UserCredential).where(UserCredential.email == email)):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email is already registered")
 
@@ -206,7 +206,8 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> dict:
 
 @app.post("/api/auth/login")
 def login(payload: LoginRequest, db: Session = Depends(get_db)) -> dict:
-    user = db.scalar(select(UserCredential).where(UserCredential.email == str(payload.email).lower()))
+    email = str(payload.email).strip().lower()
+    user = db.scalar(select(UserCredential).where(UserCredential.email == email))
     if user is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
     token = create_session_token()

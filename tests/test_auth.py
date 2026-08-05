@@ -1,5 +1,5 @@
 import backend.database as database
-from backend.models import UserCredential
+from backend.models import SessionToken, UserCredential
 
 
 def test_health_reports_database_connected(client):
@@ -47,6 +47,14 @@ def test_login_success_and_profile(client, user_headers):
 def test_login_rejects_wrong_password(client):
     response = client.post("/api/auth/login", json={"email": "user@queuesmart.example", "password": "WrongPass9!"})
     assert response.status_code == 401
+
+
+def test_login_creates_persistent_session_token(client, user_headers):
+    with database.SessionLocal() as db:
+        token_value = user_headers["Authorization"].removeprefix("Bearer ")
+        session = db.query(SessionToken).filter_by(token=token_value).one_or_none()
+        assert session is not None
+        assert session.user.email == "user@queuesmart.example"
 
 
 def test_missing_and_invalid_tokens_are_rejected(client):

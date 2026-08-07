@@ -9,5 +9,3 @@ show_missing = True
 skip_covered = False
 precision = 0
 fail_under = 80
-
-#test

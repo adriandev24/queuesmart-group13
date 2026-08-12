@@ -1,0 +1,18 @@
+QueueSmart Final Backend Coverage Verification
+Command: coverage run -m pytest -q && coverage report -m
+
+15 passed in 3.04s
+
+Name                  Stmts   Miss  Cover
+----------------------------------------
+backend/database.py      22      0   100%
+backend/logic.py        106      5    95%
+backend/main.py         334     17    95%
+backend/models.py        76      0   100%
+backend/schemas.py       52      1    98%
+backend/security.py      19      3    84%
+----------------------------------------
+TOTAL                   609     26    96%
+
+Required target: 70-80%
+Verified result: 96%

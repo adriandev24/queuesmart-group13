@@ -1,32 +1,30 @@
-from __future__ import annotations
+import os
+from pathlib import Path
+
+TEST_DB = Path(__file__).resolve().parent / "test_queuesmart.db"
+os.environ["QUEUESMART_DATABASE_URL"] = f"sqlite:///{TEST_DB}"
 
 import pytest
 from fastapi.testclient import TestClient
-
-from backend.database import configure_database, init_db
+from backend.database import Base, engine
 from backend.main import app
 
 
+@pytest.fixture(autouse=True)
+def fresh_database():
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    yield
+
+
 @pytest.fixture
-def client(tmp_path):
-    database_path = tmp_path / "queuesmart_test.db"
-    configure_database(f"sqlite:///{database_path}")
-    init_db(seed=True)
+def client():
     with TestClient(app) as test_client:
         yield test_client
 
 
-def login(client: TestClient, email: str, password: str) -> dict[str, str]:
-    response = client.post("/api/auth/login", json={"email": email, "password": password})
-    assert response.status_code == 200, response.text
-    return {"Authorization": f"Bearer {response.json()['token']}"}
-
-
-@pytest.fixture
-def user_headers(client):
-    return login(client, "user@queuesmart.example", "User123!")
-
-
-@pytest.fixture
-def admin_headers(client):
-    return login(client, "admin@queuesmart.example", "Admin123!")
+def pytest_sessionfinish(session, exitstatus):
+    try:
+        TEST_DB.unlink(missing_ok=True)
+    except OSError:
+        pass

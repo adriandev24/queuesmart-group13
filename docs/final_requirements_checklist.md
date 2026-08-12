@@ -1,0 +1,23 @@
+# Final Assignment Requirement Double-Check
+
+- [x] Fully integrated QueueSmart application.
+- [x] Assignment 2 front end preserved and integrated.
+- [x] Assignment 3 FastAPI backend/API structure preserved.
+- [x] Assignment 4 SQLite/SQLAlchemy persistence preserved.
+- [x] Administrator-only reporting module.
+- [x] Report includes users/customers and queue participation history.
+- [x] Report includes service details and queue activity.
+- [x] Report includes usage statistics: served count and average wait time, plus additional statistics.
+- [x] Report is exportable as CSV.
+- [x] Report supports optional date-range and service filters.
+- [x] Smart feature: Suggested Best Time to Join a Queue.
+- [x] Smart feature explanation covers why it is smart, user benefit, and existing-system integration.
+- [x] Backend tests rerun after final integration.
+- [x] Coverage exceeds required 70-80%: 96% verified.
+- [x] Coverage summary included in final submission document.
+- [x] Sample generated CSV report included in source package and excerpted in final submission document.
+- [x] Demo plan covers user login/queue interaction, admin service/queue management, database persistence, reporting, and smart feature.
+- [ ] Replace GitHub URL placeholder after final code is pushed.
+- [ ] Ensure meaningful GitHub commits from all four group members.
+- [ ] Ensure all group members attend and participate in the live demo.
+- [ ] Submit only one Word/PDF final document to Canvas; do not upload source code to Canvas.

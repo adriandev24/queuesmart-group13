@@ -91,8 +91,5 @@ coverage run -m pytest
 coverage report -m
 ```
 
-The final submission document records the verified pass count and coverage from the packaged code. Re-run these commands after any team changes and update the screenshot/summary if the numbers change.
 
-## GitHub contribution requirement
 
-The course requires meaningful commits from every group member. Do not upload the ZIP to Canvas. Push this source to the existing QueueSmart repository, make sure each member contributes through their own GitHub account, then put the real repository URL in the final Word/PDF submission.

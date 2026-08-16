@@ -1,22 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 120" role="img" aria-labelledby="title desc">
-  <title id="title">QueueSmart logo</title>
-  <desc id="desc">A queue of people beside a clock and the QueueSmart wordmark.</desc>
+  <title id="title">QueueSmart</title>
+  <desc id="desc">QueueSmart logo with people and a clock</desc>
   <defs>
     <linearGradient id="g" x1="0" x2="1">
-      <stop offset="0" stop-color="#2463eb"/>
-      <stop offset="1" stop-color="#13b8a6"/>
+      <stop offset="0" stop-color="#2c67d8"/>
+      <stop offset="1" stop-color="#18aa9d"/>
     </linearGradient>
   </defs>
-  <g fill="none" stroke="url(#g)" stroke-width="8" stroke-linecap="round">
-    <path d="M40 52a36 36 0 1 1 28 35"/>
-    <path d="M76 32v24l18 10"/>
-    <path d="M102 86l-4 25 24-13"/>
-  </g>
-  <g fill="url(#g)">
-    <circle cx="22" cy="72" r="8"/><rect x="15" y="82" width="14" height="25" rx="6"/>
-    <circle cx="45" cy="80" r="8"/><rect x="38" y="90" width="14" height="25" rx="6"/>
-    <circle cx="67" cy="86" r="8"/><rect x="60" y="96" width="14" height="20" rx="6"/>
-  </g>
-  <text x="140" y="80" font-family="Arial, Helvetica, sans-serif" font-size="58" font-weight="700" fill="#123565">Queue</text>
-  <text x="320" y="80" font-family="Arial, Helvetica, sans-serif" font-size="58" font-weight="700" fill="#13a999">Smart</text>
+  <circle cx="70" cy="45" r="31" fill="none" stroke="url(#g)" stroke-width="8"/>
+  <path d="M70 27v21l17 10" fill="none" stroke="#285dc1" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="25" cy="70" r="9" fill="#2c67d8"/><circle cx="48" cy="74" r="9" fill="#2583c7"/><circle cx="71" cy="78" r="9" fill="#18aa9d"/>
+  <rect x="16" y="82" width="18" height="28" rx="8" fill="#2c67d8"/><rect x="39" y="86" width="18" height="24" rx="8" fill="#2583c7"/><rect x="62" y="90" width="18" height="20" rx="8" fill="#18aa9d"/>
+  <path d="M91 77l13 13 22-28" fill="none" stroke="#18aa9d" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="145" y="78" font-family="Arial, Helvetica, sans-serif" font-size="52" font-weight="700" fill="#17375e">Queue</text>
+  <text x="300" y="78" font-family="Arial, Helvetica, sans-serif" font-size="52" font-weight="700" fill="#18aa9d">Smart</text>
 </svg>

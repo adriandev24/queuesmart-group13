@@ -1,311 +1,376 @@
 const state = {
-  token: localStorage.getItem("queuesmartToken") || "",
-  user: JSON.parse(localStorage.getItem("queuesmartUser") || "null"),
-  services: [],
-  activeQueue: null,
+  token: localStorage.getItem('queuesmart_token') || '',
+  role: localStorage.getItem('queuesmart_role') || '',
+  name: localStorage.getItem('queuesmart_name') || '',
+  email: localStorage.getItem('queuesmart_email') || '',
+  services: []
 };
 
-const screens = [...document.querySelectorAll(".screen")];
-const drawer = document.getElementById("drawer");
-const backdrop = document.getElementById("drawerBackdrop");
-const messageBox = document.getElementById("globalMessage");
+const $ = (id) => document.getElementById(id);
 
-function showMessage(message, isError = false) {
-  messageBox.textContent = message;
-  messageBox.className = `global-message${isError ? " error" : ""}`;
-  clearTimeout(showMessage.timeout);
-  showMessage.timeout = setTimeout(() => messageBox.classList.add("hidden"), 4200);
-}
-
-async function api(path, options = {}) {
-  const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+function authHeaders(json = false) {
+  const headers = {};
   if (state.token) headers.Authorization = `Bearer ${state.token}`;
-  const response = await fetch(path, { ...options, headers });
-  let payload = {};
-  try { payload = await response.json(); } catch (_) { payload = {}; }
-  if (!response.ok) {
-    const validation = payload.details?.map(item => `${item.field}: ${item.message}`).join("; ");
-    throw new Error(validation || payload.error || "The request could not be completed.");
-  }
-  return payload;
+  if (json) headers['Content-Type'] = 'application/json';
+  return headers;
 }
 
-function saveSession(token, user) {
-  state.token = token;
-  state.user = user;
-  localStorage.setItem("queuesmartToken", token);
-  localStorage.setItem("queuesmartUser", JSON.stringify(user));
-  updateSessionUI();
+async function api(url, options = {}) {
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    let detail = `Request failed (${response.status})`;
+    try {
+      const body = await response.json();
+      if (Array.isArray(body.detail)) {
+        detail = body.detail.map(item => item.msg || JSON.stringify(item)).join('; ');
+      } else if (body.detail) detail = body.detail;
+    } catch (_) {}
+    throw new Error(detail);
+  }
+  const type = response.headers.get('content-type') || '';
+  return type.includes('application/json') ? response.json() : response;
+}
+
+function message(text, isError = false) {
+  const box = $('message');
+  box.textContent = text;
+  box.classList.remove('hidden', 'error');
+  if (isError) box.classList.add('error');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  setTimeout(() => box.classList.add('hidden'), 4500);
+}
+
+function clearAuthForms() {
+  $('loginForm').reset();
+  $('registerForm').reset();
+  ['loginEmail', 'loginPassword', 'registerName', 'registerEmail', 'registerPassword'].forEach(id => {
+    const field = $(id);
+    field.value = '';
+    field.defaultValue = '';
+  });
+  $('registerRole').value = 'user';
+}
+
+function clearBrowserRestoredAuthValues() {
+  clearAuthForms();
+  // Some browsers restore/autofill credentials just after the page is painted.
+  // Clear one more time after restoration without affecting later user typing.
+  window.setTimeout(clearAuthForms, 75);
+}
+
+function setSession(data) {
+  state.token = data.token;
+  state.role = data.role;
+  state.name = data.full_name || '';
+  state.email = data.email || '';
+  localStorage.setItem('queuesmart_token', state.token);
+  localStorage.setItem('queuesmart_role', state.role);
+  localStorage.setItem('queuesmart_name', state.name);
+  localStorage.setItem('queuesmart_email', state.email);
+  syncNav();
 }
 
 function clearSession() {
-  state.token = "";
-  state.user = null;
-  state.activeQueue = null;
-  localStorage.removeItem("queuesmartToken");
-  localStorage.removeItem("queuesmartUser");
-  updateSessionUI();
+  Object.assign(state, { token: '', role: '', name: '', email: '' });
+  ['queuesmart_token','queuesmart_role','queuesmart_name','queuesmart_email'].forEach(k => localStorage.removeItem(k));
+  syncNav();
 }
 
-function updateSessionUI() {
-  document.getElementById("sessionBadge").textContent = state.user ? `${state.user.full_name} · ${state.user.role}` : "Not signed in";
-  document.getElementById("logoutButton").classList.toggle("hidden", !state.user);
-  document.querySelectorAll("[data-role]").forEach(element => {
-    element.classList.toggle("hidden", !state.user || element.dataset.role !== state.user.role);
-  });
+function syncNav() {
+  document.querySelectorAll('.user-only').forEach(el => el.classList.toggle('hidden', state.role !== 'user'));
+  document.querySelectorAll('.admin-only').forEach(el => el.classList.toggle('hidden', state.role !== 'administrator'));
+  $('logoutButton').classList.toggle('hidden', !state.token);
+  $('sessionPill').textContent = state.token ? `${state.name || state.email} · ${state.role}` : 'Not signed in';
 }
 
-function closeDrawer() {
-  drawer.classList.remove("open");
-  backdrop.classList.add("hidden");
-  document.getElementById("menuButton").setAttribute("aria-expanded", "false");
-}
-
-async function showScreen(screenId) {
-  const protectedUser = ["user-dashboard", "join-queue", "queue-status", "history"];
-  const protectedAdmin = ["admin-dashboard", "service-management", "queue-management"];
-  if (protectedUser.includes(screenId) && state.user?.role !== "user") {
-    showMessage("Please sign in with a user account.", true);
-    screenId = "login";
-  }
-  if (protectedAdmin.includes(screenId) && state.user?.role !== "administrator") {
-    showMessage("Please sign in with an administrator account.", true);
-    screenId = "login";
-  }
-  screens.forEach(screen => screen.classList.toggle("hidden", screen.id !== screenId));
-  history.replaceState(null, "", `#${screenId}`);
-  closeDrawer();
-  try {
-    if (screenId === "user-dashboard") await loadUserDashboard();
-    if (screenId === "join-queue") await prepareJoinQueue();
-    if (screenId === "queue-status") await loadQueueStatus();
-    if (screenId === "history") await loadHistory();
-    if (screenId === "admin-dashboard") await loadAdminDashboard();
-    if (screenId === "service-management") await loadServiceManagement();
-    if (screenId === "queue-management") await prepareQueueManagement();
-  } catch (error) {
-    showMessage(error.message, true);
+function showView(id) {
+  document.querySelectorAll('.view').forEach(view => view.classList.remove('active'));
+  $(id).classList.add('active');
+  if (id === 'authView') clearAuthForms();
+  if (id === 'userView') loadUserDashboard();
+  if (id === 'historyView') loadHistoryAndNotifications();
+  if (id === 'adminView') loadAdminDashboard();
+  if (id === 'reportsView') prepareReports();
+  $('sideNav').classList.remove('open');
+  if (window.matchMedia('(max-width: 980px)').matches) {
+    $('menuButton').setAttribute('aria-expanded', 'false');
   }
 }
 
-function statCard(label, value, note) {
-  return `<article class="stat-card"><span>${label}</span><strong>${value}</strong><small>${note}</small></article>`;
+function table(headers, rows) {
+  if (!rows.length) return '<p class="muted">No data available.</p>';
+  return `<div class="table-wrap"><table><thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
 }
 
-function serviceItem(service, withEdit = false) {
-  return `<div class="service-item"><div><b>${escapeHtml(service.name)}</b><p>${service.queue_length} waiting · ${service.expected_duration} min each · ${service.priority_level} priority</p></div>${withEdit ? `<button class="table-action" data-edit-service="${service.id}">Edit</button>` : `<span class="badge ${service.is_open ? "open" : "closed"}">${service.is_open ? "Open" : "Closed"}</span>`}</div>`;
+function stat(label, value) {
+  return `<div class="stat"><span>${label}</span><strong>${value}</strong></div>`;
 }
 
 function escapeHtml(value) {
-  return String(value ?? "").replace(/[&<>'"]/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
+  return String(value ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 }
 
 async function loadServices() {
-  const payload = await api("/api/services");
-  state.services = payload.services;
-  return state.services;
+  state.services = await api('/api/services');
+  const options = state.services.map(s => `<option value="${s.id}">${escapeHtml(s.name)} (${s.queue_status})</option>`).join('');
+  $('joinService').innerHTML = `<option value="">Select a service</option>${options}`;
+  $('adminQueueService').innerHTML = `<option value="">Select a service</option>${options}`;
+  $('reportService').innerHTML = `<option value="">All services</option>${options}`;
 }
+
+function toggleNavigation() {
+  const sideNav = $('sideNav');
+  const shell = document.querySelector('.shell');
+  const isMobile = window.matchMedia('(max-width: 980px)').matches;
+
+  if (isMobile) {
+    const isOpen = sideNav.classList.toggle('open');
+    $('menuButton').setAttribute('aria-expanded', String(isOpen));
+  } else {
+    const isCollapsed = shell.classList.toggle('nav-collapsed');
+    $('menuButton').setAttribute('aria-expanded', String(!isCollapsed));
+  }
+}
+
+function syncMenuState() {
+  const sideNav = $('sideNav');
+  const shell = document.querySelector('.shell');
+  const isMobile = window.matchMedia('(max-width: 980px)').matches;
+  $('menuButton').setAttribute(
+    'aria-expanded',
+    String(isMobile ? sideNav.classList.contains('open') : !shell.classList.contains('nav-collapsed'))
+  );
+}
+
+$('menuButton').addEventListener('click', toggleNavigation);
+window.addEventListener('resize', syncMenuState);
+window.addEventListener('pageshow', clearBrowserRestoredAuthValues);
+syncMenuState();
+clearBrowserRestoredAuthValues();
+document.querySelectorAll('[data-view]').forEach(btn => btn.addEventListener('click', () => showView(btn.dataset.view)));
+
+$('loginForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    const data = await api('/api/auth/login', {
+      method: 'POST', headers: { 'Content-Type':'application/json' },
+      body: JSON.stringify({ email: $('loginEmail').value, password: $('loginPassword').value })
+    });
+    setSession(data);
+    clearAuthForms();
+    message('Login successful.');
+    await loadServices();
+    showView(state.role === 'administrator' ? 'adminView' : 'userView');
+  } catch (err) { message(err.message, true); }
+});
+
+$('registerForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    await api('/api/auth/register', {
+      method: 'POST', headers: { 'Content-Type':'application/json' },
+      body: JSON.stringify({
+        full_name: $('registerName').value,
+        email: $('registerEmail').value,
+        password: $('registerPassword').value,
+        role: $('registerRole').value
+      })
+    });
+    clearAuthForms();
+    message('Registration complete. You can sign in now.');
+  } catch (err) { message(err.message, true); }
+});
+
+$('logoutButton').addEventListener('click', async () => {
+  try { if (state.token) await api('/api/auth/logout', { method:'POST', headers: authHeaders() }); } catch (_) {}
+  clearSession();
+  clearAuthForms();
+  showView('authView');
+  message('You have been logged out.');
+});
 
 async function loadUserDashboard() {
-  const payload = await api("/api/dashboard/user");
-  state.services = payload.services;
-  state.activeQueue = payload.queue_status;
-  document.getElementById("userStats").innerHTML = [
-    statCard("Current Position", payload.queue_status ? `#${payload.queue_status.position}` : "—", payload.queue_status?.service_name || "No active queue"),
-    statCard("Estimated Wait", payload.queue_status ? `${payload.queue_status.estimated_wait} min` : "0 min", "Calculated by the backend"),
-    statCard("Notifications", payload.notifications.length, "Latest queue updates"),
-  ].join("");
-  document.getElementById("dashboardServices").innerHTML = payload.services.map(service => serviceItem(service)).join("");
-  document.getElementById("dashboardNotifications").innerHTML = payload.notifications.length
-    ? payload.notifications.map(note => `<div class="notification-item"><b>${escapeHtml(note.message)}</b><span>${new Date(note.created_at).toLocaleString()}</span></div>`).join("")
-    : `<div class="empty-state">No notifications yet.</div>`;
-}
-
-async function prepareJoinQueue() {
-  const services = await loadServices();
-  const select = document.getElementById("joinService");
-  select.innerHTML = `<option value="">Choose a service</option>` + services.filter(service => service.is_open).map(service => `<option value="${service.id}">${escapeHtml(service.name)}</option>`).join("");
   try {
-    const status = await api("/api/queues/status");
-    state.activeQueue = status.queue_status;
-  } catch (_) { state.activeQueue = null; }
+    await loadServices();
+    const [statusRows, notifications] = await Promise.all([
+      api('/api/queues/status', { headers: authHeaders() }),
+      api('/api/notifications', { headers: authHeaders() })
+    ]);
+    $('userStats').innerHTML = [
+      stat('Active queues', statusRows.length),
+      stat('Available services', state.services.filter(s => s.queue_status === 'open').length),
+      stat('Unread notifications', notifications.filter(n => n.status === 'sent').length),
+      stat('Total people waiting', state.services.reduce((sum,s) => sum+s.waiting_count,0))
+    ].join('');
+    $('queueStatus').innerHTML = statusRows.length ? statusRows.map(row => `
+      <div class="queue-card"><strong>${escapeHtml(row.service_name)}</strong><p>Position <b>${row.position}</b> · Estimated wait <b>${row.estimated_wait_minutes} min</b></p>
+      <button class="secondary leave-queue" data-queue="${row.queue_id}">Leave Queue</button></div>`).join('') : '<p class="muted">You are not currently waiting in a queue.</p>';
+    document.querySelectorAll('.leave-queue').forEach(btn => btn.addEventListener('click', async () => {
+      try { await api(`/api/queues/${btn.dataset.queue}/leave`, { method:'DELETE', headers:authHeaders() }); message('You left the queue.'); loadUserDashboard(); }
+      catch (err) { message(err.message, true); }
+    }));
+  } catch (err) { message(err.message, true); }
 }
 
-async function updateEstimate() {
-  const serviceId = Number(document.getElementById("joinService").value);
-  if (!serviceId) {
-    document.getElementById("joinEstimate").textContent = "Select a service";
-    document.getElementById("joinPosition").textContent = "Backend calculation: position × expected duration";
-    return;
-  }
+$('joinService').addEventListener('change', async () => {
+  const id = $('joinService').value;
+  $('bestTimeResult').classList.add('hidden');
+  if (!id) { $('estimateText').textContent = 'Select a service to view the estimated wait.'; return; }
   try {
-    const payload = await api(`/api/services/${serviceId}/estimate`);
-    document.getElementById("joinEstimate").textContent = `${payload.estimated_wait} min`;
-    document.getElementById("joinPosition").textContent = `Predicted position: ${payload.position}`;
-  } catch (error) { showMessage(error.message, true); }
+    const estimate = await api(`/api/services/${id}/estimate`);
+    $('estimateText').textContent = `${estimate.waiting_count} waiting · approximately ${estimate.estimated_wait_minutes} minutes before joining.`;
+  } catch (err) { message(err.message, true); }
+});
+
+$('joinForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const serviceId = Number($('joinService').value);
+  if (!serviceId) return message('Select a service first.', true);
+  try {
+    const result = await api('/api/queues/join', {
+      method:'POST', headers:authHeaders(true),
+      body: JSON.stringify({ service_id: serviceId, reason_for_visit: $('joinReason').value })
+    });
+    message(`Joined ${result.service_name}. Your position is ${result.position}.`);
+    $('joinReason').value = '';
+    loadUserDashboard();
+  } catch (err) { message(err.message, true); }
+});
+
+$('bestTimeButton').addEventListener('click', async () => {
+  const serviceId = Number($('joinService').value);
+  if (!serviceId) return message('Select a service before requesting a recommendation.', true);
+  try {
+    const data = await api(`/api/services/${serviceId}/best-time`, { headers:authHeaders() });
+    const box = $('bestTimeResult');
+    box.innerHTML = `<span class="eyebrow">Smart recommendation</span><br><strong>${escapeHtml(data.recommended_window)}</strong><p>${escapeHtml(data.explanation)}</p><small>${data.historical_samples} historical served visits analyzed · Confidence: ${data.confidence} · Current waiting: ${data.current_waiting}</small>`;
+    box.classList.remove('hidden');
+  } catch (err) { message(err.message, true); }
+});
+
+async function loadHistoryAndNotifications() {
+  try {
+    const [history, notifications] = await Promise.all([
+      api('/api/history', { headers:authHeaders() }),
+      api('/api/notifications', { headers:authHeaders() })
+    ]);
+    $('historyTable').innerHTML = table(['Date','Service','Wait','Outcome'], history.map(row => `<tr><td>${new Date(row.completed_at).toLocaleString()}</td><td>${escapeHtml(row.service_name)}</td><td>${row.wait_minutes} min</td><td><span class="badge">${row.outcome}</span></td></tr>`));
+    $('notificationList').innerHTML = notifications.length ? notifications.map(n => `<div class="notification"><b>${escapeHtml(n.message)}</b><small>${new Date(n.timestamp).toLocaleString()} · ${n.status}</small></div>`).join('') : '<p class="muted">No notifications yet.</p>';
+  } catch (err) { message(err.message, true); }
 }
 
-async function loadQueueStatus() {
-  const payload = await api("/api/queues/status");
-  state.activeQueue = payload.queue_status;
-  const container = document.getElementById("statusContent");
-  if (!payload.queue_status) {
-    container.innerHTML = `<article class="panel empty-state">You are not currently waiting in a queue.</article>`;
-    return;
-  }
-  const item = payload.queue_status;
-  container.innerHTML = `
-    <article class="queue-ticket"><p>Active Ticket · ${escapeHtml(item.service_name)}</p><h2>Position #${item.position}</h2><strong>${item.estimated_wait} min estimated wait</strong><span class="badge open">${item.position <= 3 ? "Almost Ready" : "Waiting"}</span></article>
-    <article class="panel"><h2>Status Updates</h2><div class="timeline">
-      <div class="timeline-item done"><b>Joined</b><span>${new Date(item.joined_at).toLocaleString()}</span></div>
-      <div class="timeline-item done"><b>Waiting</b><span>Priority: ${item.priority}</span></div>
-      <div class="timeline-item ${item.position <= 3 ? "active" : ""}"><b>Almost Ready</b><span>${item.position <= 3 ? "You are close to being served." : "Notification will be generated when you reach the front."}</span></div>
-      <div class="timeline-item"><b>Served</b><span>Not completed yet</span></div>
-    </div></article>`;
-}
+$('refreshUser').addEventListener('click', loadUserDashboard);
+$('refreshHistory').addEventListener('click', loadHistoryAndNotifications);
 
-async function loadHistory() {
-  const payload = await api("/api/history");
-  const container = document.getElementById("historyTable");
-  if (!payload.history.length) {
-    container.innerHTML = `<div class="empty-state">No queue history is available.</div>`;
-    return;
-  }
-  container.innerHTML = `<table><thead><tr><th>Date</th><th>Service</th><th>Wait Time</th><th>Outcome</th></tr></thead><tbody>${payload.history.map(item => `<tr><td>${new Date(item.completed_at).toLocaleDateString()}</td><td>${escapeHtml(item.service_name)}</td><td>${item.wait_minutes} min</td><td><span class="badge ${item.outcome}">${item.outcome.replace("_", " ")}</span></td></tr>`).join("")}</tbody></table>`;
-}
+$('serviceForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    await api('/api/services', {
+      method:'POST', headers:authHeaders(true),
+      body: JSON.stringify({
+        name:$('serviceName').value,
+        description:$('serviceDescription').value,
+        expected_duration:Number($('serviceDuration').value),
+        priority_level:$('servicePriority').value
+      })
+    });
+    event.target.reset();
+    message('Service created.');
+    loadAdminDashboard();
+  } catch (err) { message(err.message, true); }
+});
 
 async function loadAdminDashboard() {
-  const payload = await api("/api/dashboard/admin");
-  state.services = payload.services;
-  document.getElementById("adminStats").innerHTML = [
-    statCard("Open Queues", payload.open_services, "Across campus services"),
-    statCard("Total Waiting", payload.total_waiting, "Current in-memory count"),
-    statCard("Longest Wait", `${payload.longest_wait} min`, "Queue length × service duration"),
-  ].join("");
-  document.getElementById("adminServiceTable").innerHTML = `<table><thead><tr><th>Service</th><th>Queue Length</th><th>Expected Duration</th><th>Priority</th></tr></thead><tbody>${payload.services.map(service => `<tr><td>${escapeHtml(service.name)}</td><td>${service.queue_length}</td><td>${service.expected_duration} min</td><td><span class="badge ${service.priority_level}">${service.priority_level}</span></td></tr>`).join("")}</tbody></table>`;
+  try {
+    await loadServices();
+    const data = await api('/api/admin/dashboard', { headers:authHeaders() });
+    $('adminStats').innerHTML = [stat('Services',data.service_count),stat('Open queues',data.open_queues),stat('Waiting users',data.waiting_users),stat('Database','SQLite')].join('');
+    $('serviceTable').innerHTML = table(['Service','Duration','Priority','Queue','Waiting','Action'], data.services.map(s => `<tr><td><b>${escapeHtml(s.name)}</b><br><small>${escapeHtml(s.description)}</small></td><td>${s.expected_duration} min</td><td>${s.priority_level}</td><td>${s.queue_status}</td><td>${s.waiting_count}</td><td><button class="secondary toggle-service" data-id="${s.id}">${s.queue_status === 'open' ? 'Close' : 'Open'}</button></td></tr>`));
+    document.querySelectorAll('.toggle-service').forEach(btn => btn.addEventListener('click', async () => {
+      try { await api(`/api/services/${btn.dataset.id}/queue/toggle`, { method:'POST', headers:authHeaders() }); loadAdminDashboard(); }
+      catch (err) { message(err.message, true); }
+    }));
+  } catch (err) { message(err.message, true); }
 }
 
-async function loadServiceManagement() {
-  const services = await loadServices();
-  document.getElementById("serviceCards").innerHTML = services.map(service => serviceItem(service, true)).join("");
-  document.querySelectorAll("[data-edit-service]").forEach(button => button.addEventListener("click", () => editService(Number(button.dataset.editService))));
+$('refreshAdmin').addEventListener('click', loadAdminDashboard);
+$('loadAdminQueue').addEventListener('click', loadSelectedAdminQueue);
+$('serveNext').addEventListener('click', async () => {
+  const id = $('adminQueueService').value;
+  if (!id) return message('Select a service first.', true);
+  try { await api(`/api/admin/queues/${id}/serve-next`, { method:'POST', headers:authHeaders() }); message('Next user served.'); loadSelectedAdminQueue(); loadAdminDashboard(); }
+  catch (err) { message(err.message, true); }
+});
+
+async function loadSelectedAdminQueue() {
+  const id = $('adminQueueService').value;
+  if (!id) return $('adminQueueTable').innerHTML = '<p class="muted">Select a service.</p>';
+  try {
+    const data = await api(`/api/admin/queues/${id}`, { headers:authHeaders() });
+    $('adminQueueTable').innerHTML = table(['Pos.','Customer','Reason','Joined','Actions'], data.entries.map(e => `<tr><td>${e.position}</td><td><b>${escapeHtml(e.name)}</b><br><small>${escapeHtml(e.email)}</small></td><td>${escapeHtml(e.reason_for_visit)}</td><td>${new Date(e.joined_at).toLocaleTimeString()}</td><td><div class="button-row"><button class="secondary move-entry" data-id="${e.id}" data-dir="up">↑</button><button class="secondary move-entry" data-id="${e.id}" data-dir="down">↓</button><button class="secondary remove-entry" data-id="${e.id}">Remove</button></div></td></tr>`));
+    document.querySelectorAll('.move-entry').forEach(btn => btn.addEventListener('click', async () => {
+      try { await api(`/api/admin/queues/${id}/entries/${btn.dataset.id}/move`, { method:'POST', headers:authHeaders(true), body:JSON.stringify({direction:btn.dataset.dir}) }); loadSelectedAdminQueue(); }
+      catch (err) { message(err.message, true); }
+    }));
+    document.querySelectorAll('.remove-entry').forEach(btn => btn.addEventListener('click', async () => {
+      try { await api(`/api/admin/queues/${id}/entries/${btn.dataset.id}`, { method:'DELETE', headers:authHeaders() }); loadSelectedAdminQueue(); loadAdminDashboard(); }
+      catch (err) { message(err.message, true); }
+    }));
+  } catch (err) { message(err.message, true); }
 }
 
-function editService(serviceId) {
-  const service = state.services.find(item => item.id === serviceId);
-  if (!service) return;
-  document.getElementById("editingServiceId").value = service.id;
-  document.getElementById("serviceName").value = service.name;
-  document.getElementById("serviceDescription").value = service.description;
-  document.getElementById("serviceDuration").value = service.expected_duration;
-  document.getElementById("servicePriority").value = service.priority_level;
-  document.getElementById("serviceFormTitle").textContent = "Update Service";
-  document.getElementById("cancelEditButton").classList.remove("hidden");
+async function prepareReports() {
+  try { await loadServices(); } catch (err) { message(err.message, true); }
 }
 
-function resetServiceForm() {
-  document.getElementById("serviceForm").reset();
-  document.getElementById("editingServiceId").value = "";
-  document.getElementById("serviceFormTitle").textContent = "Create Service";
-  document.getElementById("cancelEditButton").classList.add("hidden");
+function reportQuery() {
+  const p = new URLSearchParams();
+  if ($('reportStart').value) p.set('start_date', $('reportStart').value);
+  if ($('reportEnd').value) p.set('end_date', $('reportEnd').value);
+  if ($('reportService').value) p.set('service_id', $('reportService').value);
+  return p.toString();
 }
 
-async function prepareQueueManagement() {
-  const services = await loadServices();
-  const select = document.getElementById("adminQueueService");
-  const current = select.value;
-  select.innerHTML = services.map(service => `<option value="${service.id}">${escapeHtml(service.name)}</option>`).join("");
-  if (current && services.some(service => String(service.id) === current)) select.value = current;
-  await loadAdminQueue();
-}
-
-async function loadAdminQueue() {
-  const serviceId = Number(document.getElementById("adminQueueService").value);
-  const container = document.getElementById("adminQueueTable");
-  if (!serviceId) { container.innerHTML = `<div class="empty-state">No service selected.</div>`; return; }
-  const payload = await api(`/api/admin/queues/${serviceId}`);
-  if (!payload.queue.length) { container.innerHTML = `<div class="empty-state">No users are waiting in this queue.</div>`; return; }
-  container.innerHTML = `<table><thead><tr><th>Position</th><th>User</th><th>Reason</th><th>Priority</th><th>Estimated Wait</th></tr></thead><tbody>${payload.queue.map(item => `<tr><td>#${item.position}</td><td>${escapeHtml(item.user_name)}</td><td>${escapeHtml(item.reason)}</td><td><span class="badge ${item.priority}">${item.priority}</span></td><td>${item.estimated_wait} min</td></tr>`).join("")}</tbody></table>`;
-}
-
-// Navigation and drawer
-document.getElementById("menuButton").addEventListener("click", () => {
-  const open = drawer.classList.toggle("open");
-  backdrop.classList.toggle("hidden", !open);
-  document.getElementById("menuButton").setAttribute("aria-expanded", String(open));
-});
-backdrop.addEventListener("click", closeDrawer);
-document.querySelectorAll("[data-screen]").forEach(element => element.addEventListener("click", () => showScreen(element.dataset.screen)));
-document.getElementById("logoutButton").addEventListener("click", () => { clearSession(); showScreen("login"); showMessage("You have been logged out."); });
-
-// Authentication
-document.getElementById("loginForm").addEventListener("submit", async event => {
-  event.preventDefault();
+$('previewReport').addEventListener('click', async () => {
   try {
-    const payload = await api("/api/auth/login", { method: "POST", body: JSON.stringify({ email: loginEmail.value, password: loginPassword.value, role: loginRole.value }) });
-    saveSession(payload.token, payload.user);
-    showMessage(payload.message);
-    showScreen(payload.user.role === "administrator" ? "admin-dashboard" : "user-dashboard");
-  } catch (error) { showMessage(error.message, true); }
+    const data = await api(`/api/admin/reports/summary?${reportQuery()}`, { headers:authHeaders() });
+    const s = data.statistics;
+    $('reportStats').innerHTML = [stat('Served',s.users_served),stat('Avg. wait',`${s.average_wait_minutes} min`),stat('Participations',s.total_participations),stat('Unique customers',s.unique_customers)].join('');
+    $('reportServices').innerHTML = table(['Service','Queue','Waiting','Served','Canceled'], data.services.map(row => `<tr><td><b>${escapeHtml(row.name)}</b><br><small>${escapeHtml(row.description)}</small></td><td>${row.queue_status}</td><td>${row.current_waiting}</td><td>${row.served}</td><td>${row.canceled}</td></tr>`));
+    const userRows = [];
+    data.users.forEach(user => {
+      if (!user.history.length) userRows.push(`<tr><td>${escapeHtml(user.full_name)}</td><td>${escapeHtml(user.email)}</td><td colspan="4">No matching participation history</td></tr>`);
+      user.history.forEach(h => userRows.push(`<tr><td>${escapeHtml(user.full_name)}</td><td>${escapeHtml(user.email)}</td><td>${escapeHtml(h.service)}</td><td>${new Date(h.completed_at).toLocaleDateString()}</td><td>${h.wait_minutes} min</td><td>${h.outcome}</td></tr>`));
+    });
+    $('reportUsers').innerHTML = table(['Customer','Email','Service','Date','Wait','Outcome'], userRows);
+  } catch (err) { message(err.message, true); }
 });
 
-document.getElementById("registerForm").addEventListener("submit", async event => {
-  event.preventDefault();
+$('exportReport').addEventListener('click', async () => {
   try {
-    const payload = await api("/api/auth/register", { method: "POST", body: JSON.stringify({ full_name: registerName.value, email: registerEmail.value, password: registerPassword.value, role: registerRole.value }) });
-    saveSession(payload.token, payload.user);
-    showMessage(payload.message);
-    showScreen(payload.user.role === "administrator" ? "admin-dashboard" : "user-dashboard");
-  } catch (error) { showMessage(error.message, true); }
+    const response = await api(`/api/admin/reports/export.csv?${reportQuery()}`, { headers:authHeaders() });
+    const blob = await response.blob();
+    const disposition = response.headers.get('content-disposition') || '';
+    const match = disposition.match(/filename="([^"]+)"/);
+    const filename = match ? match[1] : 'queuesmart_report.csv';
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(link.href);
+    message('CSV report generated.');
+  } catch (err) { message(err.message, true); }
 });
 
-// Queue actions
-document.getElementById("joinService").addEventListener("change", updateEstimate);
-document.getElementById("joinQueueForm").addEventListener("submit", async event => {
-  event.preventDefault();
+syncNav();
+(async () => {
+  if (!state.token) return showView('authView');
   try {
-    const payload = await api("/api/queues/join", { method: "POST", body: JSON.stringify({ service_id: Number(joinService.value), reason: joinReason.value }) });
-    state.activeQueue = payload.queue_entry;
-    showMessage(`${payload.message}. Position ${payload.queue_entry.position}.`);
-    showScreen("queue-status");
-  } catch (error) { showMessage(error.message, true); }
-});
-document.getElementById("leaveQueueButton").addEventListener("click", async () => {
-  try {
-    const status = await api("/api/queues/status");
-    if (!status.queue_status) throw new Error("You do not have an active queue entry.");
-    await api(`/api/queues/${status.queue_status.service_id}/leave`, { method: "DELETE" });
-    state.activeQueue = null;
-    showMessage("You left the queue. The result was added to history.");
-    showScreen("history");
-  } catch (error) { showMessage(error.message, true); }
-});
-document.getElementById("refreshStatusButton").addEventListener("click", loadQueueStatus);
-
-// Service management
-document.getElementById("serviceForm").addEventListener("submit", async event => {
-  event.preventDefault();
-  const id = Number(document.getElementById("editingServiceId").value);
-  const body = { name: serviceName.value, description: serviceDescription.value, expected_duration: Number(serviceDuration.value), priority_level: servicePriority.value };
-  try {
-    const payload = await api(id ? `/api/services/${id}` : "/api/services", { method: id ? "PUT" : "POST", body: JSON.stringify(body) });
-    showMessage(payload.message);
-    resetServiceForm();
-    await loadServiceManagement();
-  } catch (error) { showMessage(error.message, true); }
-});
-document.getElementById("cancelEditButton").addEventListener("click", resetServiceForm);
-
-// Admin queue actions
-document.getElementById("adminQueueService").addEventListener("change", loadAdminQueue);
-document.getElementById("serveNextButton").addEventListener("click", async () => {
-  const serviceId = Number(document.getElementById("adminQueueService").value);
-  try {
-    const payload = await api(`/api/admin/queues/${serviceId}/serve-next`, { method: "POST" });
-    showMessage(`${payload.served_user} was marked as served.`);
-    await loadAdminQueue();
-  } catch (error) { showMessage(error.message, true); }
-});
-
-updateSessionUI();
-showScreen(location.hash.slice(1) || (state.user?.role === "administrator" ? "admin-dashboard" : state.user ? "user-dashboard" : "login"));
+    await api('/api/profile', { headers:authHeaders() });
+    await loadServices();
+    showView(state.role === 'administrator' ? 'adminView' : 'userView');
+  } catch (_) {
+    clearSession();
+    showView('authView');
+  }
+})();

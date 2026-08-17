@@ -77,6 +77,7 @@ function clearSession() {
 }
 
 function syncNav() {
+  $('authNavButton').classList.toggle('hidden', !!state.token);
   document.querySelectorAll('.user-only').forEach(el => el.classList.toggle('hidden', state.role !== 'user'));
   document.querySelectorAll('.admin-only').forEach(el => el.classList.toggle('hidden', state.role !== 'administrator'));
   $('logoutButton').classList.toggle('hidden', !state.token);
@@ -320,7 +321,41 @@ async function loadSelectedAdminQueue() {
 }
 
 async function prepareReports() {
+  syncReportDateLimits();
   try { await loadServices(); } catch (err) { message(err.message, true); }
+}
+
+function todayForDateInput() {
+  const today = new Date();
+  const offset = today.getTimezoneOffset();
+  return new Date(today.getTime() - offset * 60_000).toISOString().slice(0, 10);
+}
+
+function syncReportDateLimits() {
+  const start = $('reportStart');
+  const end = $('reportEnd');
+  const today = todayForDateInput();
+
+  start.max = end.value || today;
+  end.min = start.value;
+  end.max = today;
+}
+
+function reportDatesAreValid() {
+  syncReportDateLimits();
+  const start = $('reportStart');
+  const end = $('reportEnd');
+  const today = todayForDateInput();
+
+  if (start.value && end.value && start.value > end.value) {
+    message('Start date cannot be after the end date.', true);
+    return false;
+  }
+  if (start.value > today || end.value > today) {
+    message('Reporting dates cannot be after today.', true);
+    return false;
+  }
+  return true;
 }
 
 function reportQuery() {
@@ -332,6 +367,7 @@ function reportQuery() {
 }
 
 $('previewReport').addEventListener('click', async () => {
+  if (!reportDatesAreValid()) return;
   try {
     const data = await api(`/api/admin/reports/summary?${reportQuery()}`, { headers:authHeaders() });
     const s = data.statistics;
@@ -347,6 +383,7 @@ $('previewReport').addEventListener('click', async () => {
 });
 
 $('exportReport').addEventListener('click', async () => {
+  if (!reportDatesAreValid()) return;
   try {
     const response = await api(`/api/admin/reports/export.csv?${reportQuery()}`, { headers:authHeaders() });
     const blob = await response.blob();
@@ -361,6 +398,12 @@ $('exportReport').addEventListener('click', async () => {
     message('CSV report generated.');
   } catch (err) { message(err.message, true); }
 });
+
+['reportStart', 'reportEnd'].forEach(id => {
+  $(id).addEventListener('input', syncReportDateLimits);
+  $(id).addEventListener('change', syncReportDateLimits);
+});
+syncReportDateLimits();
 
 syncNav();
 (async () => {

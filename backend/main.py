@@ -99,8 +99,13 @@ def _parse_end(date_text: str | None) -> datetime | None:
 def _validate_report_filters(db: Session, start_date: str | None, end_date: str | None, service_id: int | None):
     start = _parse_start(start_date)
     end = _parse_end(end_date)
+    today = datetime.now().date()
     if start and end and start > end:
         raise HTTPException(status_code=422, detail="start_date cannot be after end_date")
+    if start and start.date() > today:
+        raise HTTPException(status_code=422, detail="start_date cannot be in the future")
+    if end and end.date() > today:
+        raise HTTPException(status_code=422, detail="end_date cannot be in the future")
     if service_id and not db.get(Service, service_id):
         raise HTTPException(status_code=404, detail="Service not found")
     return start, end

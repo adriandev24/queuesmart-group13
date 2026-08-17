@@ -77,6 +77,7 @@ function clearSession() {
 }
 
 function syncNav() {
+  $('authNavButton').classList.toggle('hidden', !!state.token);
   document.querySelectorAll('.user-only').forEach(el => el.classList.toggle('hidden', state.role !== 'user'));
   document.querySelectorAll('.admin-only').forEach(el => el.classList.toggle('hidden', state.role !== 'administrator'));
   $('logoutButton').classList.toggle('hidden', !state.token);

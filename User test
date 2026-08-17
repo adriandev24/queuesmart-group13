@@ -1,0 +1,5 @@
+User test
+
+Admin test
+curl -X GET "http://127.0.0.1:8000/api/admin/reports/summary" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
